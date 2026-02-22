@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npm run dev:*)",
+      "Bash(docker compose exec:*)",
+      "Bash(for topic in adapter.account.create adapter.account.created adapter.deposit.confirm adapter.deposit.detected adapter.deposit.confirmed adapter.withdraw.request adapter.withdraw.sent adapter.withdraw.status adapter.withdraw.confirmed)",
+      "Bash(do)",
+      "Bash(done)",
+      "Bash(KAFKAJS_NO_PARTITIONER_WARNING=1 npm run dev:*)",
+      "Bash(USE_MOCK_KMS=true KAFKAJS_NO_PARTITIONER_WARNING=1 npm run dev:*)"
+    ]
+  }
+}
