@@ -9,13 +9,41 @@ import {
 import { AccountRepository } from "../domain/port/out/AccountRepository";
 import { BlockchainPort } from "../domain/port/out/BlockchainPort";
 import { MessagePublisher } from "../domain/port/out/MessagePublisher";
+import { withErrorHandling } from "./support/withErrorHandling";
+import { successResponse } from "../shared/response";
 
 export class DepositService implements HandleDepositUseCase, CheckConfirmUseCase {
+  readonly checkConfirm: (req: CheckConfirmRequest) => Promise<void>;
+
   constructor(
     private readonly accountRepo: AccountRepository,
     private readonly blockchain: BlockchainPort,
     private readonly publisher: MessagePublisher,
-  ) {}
+  ) {
+    this.checkConfirm = withErrorHandling(
+      publisher,
+      {
+        topic: "adapter.deposit.confirmed",
+        label: "Deposit",
+        getRequestId: (req) => req.requestId,
+        getErrorContext: (req) => ({ txHash: req.txHash, status: "failed" as const }),
+      },
+      async (req) => {
+        const { requestId, txHash, chain } = req;
+
+        const result = await this.blockchain.checkConfirmations(chain, txHash);
+
+        console.log(
+          `[Deposit] Confirm check: ${txHash} -> ${result.status} (${result.confirmations}/${result.required})`,
+        );
+
+        await this.publisher.publish(
+          "adapter.deposit.confirmed",
+          successResponse(requestId, { ...result }),
+        );
+      },
+    );
+  }
 
   async handleDeposit(event: DepositEvent): Promise<void> {
     const { txHash, toAddress, amount, chain } = event;
@@ -38,31 +66,6 @@ export class DepositService implements HandleDepositUseCase, CheckConfirmUseCase
       });
     } catch (err) {
       console.error(`[Deposit] handleDeposit failed for tx ${txHash}:`, err);
-    }
-  }
-
-  async checkConfirm(req: CheckConfirmRequest): Promise<void> {
-    const { requestId, txHash, chain } = req;
-
-    try {
-      const result = await this.blockchain.checkConfirmations(chain, txHash);
-
-      console.log(
-        `[Deposit] Confirm check: ${txHash} -> ${result.status} (${result.confirmations}/${result.required})`,
-      );
-
-      await this.publisher.publish("adapter.deposit.confirmed", {
-        requestId,
-        ...result,
-      });
-    } catch (err) {
-      console.error("[Deposit] Confirm check failed:", err);
-      await this.publisher.publish("adapter.deposit.confirmed", {
-        requestId,
-        txHash,
-        status: "failed",
-        error: (err as Error).message,
-      });
     }
   }
 }

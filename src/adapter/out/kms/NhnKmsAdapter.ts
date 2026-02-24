@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 import { KmsPort } from "../../../domain/port/out/KmsPort";
+import { InfrastructureError, ErrorCode } from "../../../shared/errors";
 
 interface KmsConfig {
   appKey: string;
@@ -28,7 +29,7 @@ export class NhnKmsAdapter implements KmsPort {
     );
 
     if (!res.data?.body?.secret) {
-      throw new Error("Failed to retrieve signing key from KMS");
+      throw new InfrastructureError("Failed to retrieve signing key from KMS", ErrorCode.KMS_KEY_RETRIEVAL_FAILED);
     }
 
     return res.data.body.secret;
@@ -41,7 +42,7 @@ export class NhnKmsAdapter implements KmsPort {
     );
 
     if (!res.data?.body?.signature) {
-      throw new Error("Failed to sign data via KMS");
+      throw new InfrastructureError("Failed to sign data via KMS", ErrorCode.KMS_SIGNING_FAILED);
     }
 
     return res.data.body.signature;

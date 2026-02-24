@@ -3,6 +3,7 @@ import {
   BlockchainPort,
   ConfirmResult,
 } from "../../../domain/port/out/BlockchainPort";
+import { InfrastructureError, ErrorCode } from "../../../shared/errors";
 
 interface BlockchainConfig {
   rpcUrls: Record<string, string>;
@@ -29,26 +30,35 @@ export class EthersBlockchainAdapter implements BlockchainPort {
 
   async checkConfirmations(chain: string, txHash: string): Promise<ConfirmResult> {
     const provider = this.getProvider(chain);
-    const receipt = await provider.getTransactionReceipt(txHash);
     const required = this.blockchainConfig.requiredConfirmations;
 
-    if (!receipt) {
-      return { txHash, status: "pending", confirmations: 0, required };
+    try {
+      const receipt = await provider.getTransactionReceipt(txHash);
+
+      if (!receipt) {
+        return { txHash, status: "pending", confirmations: 0, required };
+      }
+
+      if (receipt.status === 0) {
+        return { txHash, status: "failed", confirmations: 0, required };
+      }
+
+      const currentBlock = await provider.getBlockNumber();
+      const confirmations = currentBlock - receipt.blockNumber + 1;
+
+      return {
+        txHash,
+        status: confirmations >= required ? "confirmed" : "pending",
+        confirmations,
+        required,
+      };
+    } catch (error) {
+      if (error instanceof InfrastructureError) throw error;
+      throw new InfrastructureError(
+        `RPC call failed for chain ${chain}: ${error instanceof Error ? error.message : String(error)}`,
+        ErrorCode.RPC_CONNECTION_FAILED,
+      );
     }
-
-    if (receipt.status === 0) {
-      return { txHash, status: "failed", confirmations: 0, required };
-    }
-
-    const currentBlock = await provider.getBlockNumber();
-    const confirmations = currentBlock - receipt.blockNumber + 1;
-
-    return {
-      txHash,
-      status: confirmations >= required ? "confirmed" : "pending",
-      confirmations,
-      required,
-    };
   }
 
   private getProvider(chain: string): JsonRpcProvider {
@@ -56,7 +66,7 @@ export class EthersBlockchainAdapter implements BlockchainPort {
     if (existing) return existing;
 
     const url = this.blockchainConfig.rpcUrls[chain];
-    if (!url) throw new Error(`No RPC URL configured for chain: ${chain}`);
+    if (!url) throw new InfrastructureError(`No RPC URL configured for chain: ${chain}`, ErrorCode.RPC_NOT_CONFIGURED);
 
     const provider = new JsonRpcProvider(url);
     this.providers.set(chain, provider);

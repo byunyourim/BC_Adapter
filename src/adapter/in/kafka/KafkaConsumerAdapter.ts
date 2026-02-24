@@ -1,4 +1,5 @@
 import { Consumer, EachMessagePayload } from "kafkajs";
+import { AppError } from "../../../shared/errors";
 
 type MessageHandler = (payload: Record<string, unknown>) => Promise<void>;
 
@@ -29,7 +30,11 @@ export class KafkaConsumerAdapter {
           console.log(`[Kafka] Received on ${topic}:`, data);
           await handler(data);
         } catch (err) {
-          console.error(`[Kafka] Error processing ${topic}:`, err);
+          if (err instanceof AppError) {
+            console.error(`[Kafka] ${err.name} [${err.code}] on ${topic}: ${err.message}`);
+          } else {
+            console.error(`[Kafka] Unexpected error processing ${topic}:`, err);
+          }
         }
       },
     });

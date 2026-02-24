@@ -1,3 +1,5 @@
+import { ValidationError, ErrorCode } from "./errors";
+
 export function requireFields(
   data: Record<string, unknown>,
   fields: string[],
@@ -6,6 +8,6 @@ export function requireFields(
     (f) => data[f] === undefined || data[f] === null || data[f] === "",
   );
   if (missing.length > 0) {
-    throw new Error(`Missing required fields: ${missing.join(", ")}`);
+    throw new ValidationError(`Missing required fields: ${missing.join(", ")}`, ErrorCode.MISSING_REQUIRED_FIELDS);
   }
 }

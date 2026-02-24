@@ -8,7 +8,11 @@
       "Bash(do)",
       "Bash(done)",
       "Bash(KAFKAJS_NO_PARTITIONER_WARNING=1 npm run dev:*)",
-      "Bash(USE_MOCK_KMS=true KAFKAJS_NO_PARTITIONER_WARNING=1 npm run dev:*)"
+      "Bash(USE_MOCK_KMS=true KAFKAJS_NO_PARTITIONER_WARNING=1 npm run dev:*)",
+      "Bash(ls C:\\\\Users\\\\yrbyun\\\\IdeaProjects\\\\study\\\\BC_Adapter\\\\docs:*)",
+      "Bash(cd \"C:\\\\Users\\\\yrbyun\\\\IdeaProjects\\\\study\\\\BC_Adapter\" && npx @asyncapi/studio asyncapi.yaml 2>&1)",
+      "Bash(npx:*)",
+      "Bash(mkdir:*)"
     ]
   }
 }
