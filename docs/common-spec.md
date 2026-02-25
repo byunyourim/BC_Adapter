@@ -11,24 +11,45 @@
 
 ## 목차
 
+### A. 에러 / 응답 / 검증
+
 1. [에러 체계](#1-에러-체계)
-2. [응답 규격](#2-응답-규격)
-3. [입력 검증](#3-입력-검증)
-4. [에러 핸들링 래퍼](#4-에러-핸들링-래퍼)
-5. [Kafka 토픽 상수](#5-kafka-토픽-상수)
+2. [인프라 에러 래핑 유틸](#2-인프라-에러-래핑-유틸)
+3. [응답 규격](#3-응답-규격)
+4. [입력 검증](#4-입력-검증)
+5. [에러 핸들링 래퍼](#5-에러-핸들링-래퍼)
+
+### B. 블록체인 유틸리티
+
 6. [체인 타입 및 검증](#6-체인-타입-및-검증)
 7. [체인 Provider 레지스트리](#7-체인-provider-레지스트리)
-8. [인프라 에러 래핑 유틸](#8-인프라-에러-래핑-유틸)
-9. [Salt 해싱 유틸](#9-salt-해싱-유틸)
-10. [주소 정규화](#10-주소-정규화)
-11. [로거](#11-로거)
-12. [Retry 유틸](#12-retry-유틸)
-13. [Kafka 토픽 라우팅](#13-kafka-토픽-라우팅)
-14. [AsyncAPI 데코레이터](#14-asyncapi-데코레이터)
+8. [Salt 해싱 유틸](#8-salt-해싱-유틸)
+9. [주소 정규화](#9-주소-정규화)
+
+### C. 메시징
+
+10. [Kafka 토픽 상수](#10-kafka-토픽-상수)
+11. [Kafka 토픽 라우팅](#11-kafka-토픽-라우팅)
+12. [AsyncAPI 데코레이터](#12-asyncapi-데코레이터)
+
+### D. 인프라 공통
+
+13. [로거](#13-로거)
+14. [Retry 유틸](#14-retry-유틸)
+
+### E. 시스템 구성
+
 15. [환경 설정](#15-환경-설정)
 16. [DI 및 부트스트랩](#16-di-및-부트스트랩)
+
+### F. 부록
+
 17. [공통 모듈 호출 흐름](#17-공통-모듈-호출-흐름)
 18. [리팩토링 이력](#18-리팩토링-이력)
+
+---
+
+# A. 에러 / 응답 / 검증
 
 ---
 
@@ -89,7 +110,7 @@ if (err instanceof AppError) {
   // UNKNOWN_ERROR 처리
 }
 
-// 인프라 어댑터에서는 wrapInfraError로 통일 (§8 참조)
+// 인프라 어댑터에서는 wrapInfraError로 통일 (§2 참조)
 catch (error) {
   wrapInfraError(error, "Failed to build UserOperation", ErrorCode.BUNDLER_BUILD_FAILED);
 }
@@ -97,14 +118,59 @@ catch (error) {
 
 ---
 
-## 2. 응답 규격
+## 2. 인프라 에러 래핑 유틸
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/shared/errors.ts` (하단) |
+| 용도 | 인프라 어댑터의 catch 블록을 1줄로 통일 |
+
+### 2.1 구현
+
+```typescript
+export function wrapInfraError(
+  error: unknown,
+  message: string,
+  code: string,
+): never {
+  if (error instanceof AppError) throw error;
+  throw new InfrastructureError(
+    `${message}: ${error instanceof Error ? error.message : String(error)}`,
+    code,
+  );
+}
+```
+
+- `AppError` 하위 에러(ValidationError 등)는 그대로 re-throw
+- 외부 라이브러리 에러는 `InfrastructureError`로 래핑
+
+### 2.2 적용 위치
+
+| 파일 | ErrorCode |
+|------|-----------|
+| `EthersBlockchainAdapter.ts` | `RPC_CONNECTION_FAILED` |
+| `ERC4337BundlerAdapter.ts` | `BUNDLER_BUILD_FAILED`, `BUNDLER_SEND_FAILED`, `BUNDLER_RECEIPT_FAILED` |
+| `TypeOrmAccountRepository.ts` | `DB_SAVE_FAILED`, `DB_QUERY_FAILED` |
+| `NhnKmsAdapter.ts` | `KMS_KEY_RETRIEVAL_FAILED`, `KMS_SIGNING_FAILED` |
+
+### 2.3 사용 예시
+
+```typescript
+catch (error) {
+  wrapInfraError(error, "Failed to build UserOperation", ErrorCode.BUNDLER_BUILD_FAILED);
+}
+```
+
+---
+
+## 3. 응답 규격
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/response.ts` |
 | 용도 | Kafka 응답 메시지의 성공/실패 형식 통일 |
 
-### 2.1 `successResponse(requestId, data)`
+### 3.1 `successResponse(requestId, data)`
 
 ```typescript
 function successResponse(
@@ -127,7 +193,7 @@ function successResponse(
 }
 ```
 
-### 2.2 `errorResponse(requestId, err, extra?)`
+### 3.2 `errorResponse(requestId, err, extra?)`
 
 ```typescript
 function errorResponse(
@@ -157,7 +223,7 @@ function errorResponse(
 - `err`이 `AppError`이면 `err.code`를 `errorCode`에 사용
 - 그 외에는 `"UNKNOWN_ERROR"` 고정
 
-### 2.3 인터페이스별 추가 컨텍스트
+### 3.3 인터페이스별 추가 컨텍스트
 
 | 인터페이스 | extra 필드 | 용도 |
 |-----------|-----------|------|
@@ -166,14 +232,14 @@ function errorResponse(
 
 ---
 
-## 3. 입력 검증
+## 4. 입력 검증
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/validation.ts` |
 | 용도 | Kafka 메시지 수신 시 필수 필드 검증 |
 
-### 3.1 `requireFields(data, fields)`
+### 4.1 `requireFields(data, fields)`
 
 ```typescript
 function requireFields(
@@ -191,7 +257,7 @@ function requireFields(
 
 에러 메시지 형식: `"Missing required fields: field1, field2"`
 
-### 3.2 토픽별 필수 필드
+### 4.2 토픽별 필수 필드
 
 | 토픽 | 필수 필드 |
 |------|----------|
@@ -200,7 +266,7 @@ function requireFields(
 | `Topics.WITHDRAW_REQUEST` | requestId, chain, fromAddress, toAddress, amount, token |
 | `Topics.WITHDRAW_STATUS` | requestId, chain, userOpHash |
 
-### 3.3 검증 위치
+### 4.3 검증 위치
 
 `app.ts`의 Kafka Consumer 핸들러에서 `requireFields()` → `validateChain()` 순서로 실행:
 
@@ -214,14 +280,14 @@ kafkaConsumer.register(Topics.ACCOUNT_CREATE, async (data) => {
 
 ---
 
-## 4. 에러 핸들링 래퍼
+## 5. 에러 핸들링 래퍼
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/application/support/withErrorHandling.ts` |
 | 용도 | 서비스 메서드를 감싸서 에러 발생 시 자동으로 Kafka에 에러 응답 발행 |
 
-### 4.1 `withErrorHandling(publisher, options, fn)`
+### 5.1 `withErrorHandling(publisher, options, fn)`
 
 ```typescript
 function withErrorHandling<TReq>(
@@ -240,7 +306,7 @@ function withErrorHandling<TReq>(
 
 내부에서 `createLogger(label)`로 로거를 생성하여 에러 로깅에 사용합니다.
 
-### 4.2 처리 흐름
+### 5.2 처리 흐름
 
 ```
 fn(req) 실행
@@ -253,7 +319,7 @@ fn(req) 실행
         └── publisher.publish(topic, errorResponse) → Kafka 발행
 ```
 
-### 4.3 서비스별 적용 현황
+### 5.3 서비스별 적용 현황
 
 | 서비스 | 메서드 | topic | label | errorContext |
 |--------|--------|-------|-------|-------------|
@@ -264,40 +330,7 @@ fn(req) 실행
 
 ---
 
-## 5. Kafka 토픽 상수
-
-| 항목 | 내용 |
-|------|------|
-| 파일 | `src/shared/topics.ts` |
-| 용도 | 모든 Kafka 토픽을 중앙 관리하여 하드코딩 방지 |
-
-### 5.1 토픽 정의
-
-```typescript
-export const Topics = {
-  // Inbound (Subscribe)
-  ACCOUNT_CREATE:     "adapter.account.create",
-  DEPOSIT_CONFIRM:    "adapter.deposit.confirm",
-  WITHDRAW_REQUEST:   "adapter.withdraw.request",
-  WITHDRAW_STATUS:    "adapter.withdraw.status",
-
-  // Outbound (Publish)
-  ACCOUNT_CREATED:    "adapter.account.created",
-  DEPOSIT_DETECTED:   "adapter.deposit.detected",
-  DEPOSIT_CONFIRMED:  "adapter.deposit.confirmed",
-  WITHDRAW_SENT:      "adapter.withdraw.sent",
-  WITHDRAW_CONFIRMED: "adapter.withdraw.confirmed",
-} as const;
-```
-
-### 5.2 사용 위치
-
-| 파일 | 용도 |
-|------|------|
-| `app.ts` | Consumer 등록 — `Topics.ACCOUNT_CREATE`, `Topics.DEPOSIT_CONFIRM`, `Topics.WITHDRAW_REQUEST`, `Topics.WITHDRAW_STATUS` |
-| `AccountService.ts` | withErrorHandling topic + 성공 publish — `Topics.ACCOUNT_CREATED` |
-| `DepositService.ts` | withErrorHandling topic + 성공 publish — `Topics.DEPOSIT_CONFIRMED`, `Topics.DEPOSIT_DETECTED` |
-| `WithdrawService.ts` | withErrorHandling topic + 성공 publish — `Topics.WITHDRAW_SENT`, `Topics.WITHDRAW_CONFIRMED` |
+# B. 블록체인 유틸리티
 
 ---
 
@@ -394,60 +427,14 @@ export class ChainProviderRegistry {
 
 ---
 
-## 8. 인프라 에러 래핑 유틸
-
-| 항목 | 내용 |
-|------|------|
-| 파일 | `src/shared/errors.ts` (하단) |
-| 용도 | 인프라 어댑터의 catch 블록을 1줄로 통일 |
-
-### 8.1 구현
-
-```typescript
-export function wrapInfraError(
-  error: unknown,
-  message: string,
-  code: string,
-): never {
-  if (error instanceof AppError) throw error;
-  throw new InfrastructureError(
-    `${message}: ${error instanceof Error ? error.message : String(error)}`,
-    code,
-  );
-}
-```
-
-- `AppError` 하위 에러(ValidationError 등)는 그대로 re-throw
-- 외부 라이브러리 에러는 `InfrastructureError`로 래핑
-
-### 8.2 적용 위치
-
-| 파일 | ErrorCode |
-|------|-----------|
-| `EthersBlockchainAdapter.ts` | `RPC_CONNECTION_FAILED` |
-| `ERC4337BundlerAdapter.ts` | `BUNDLER_BUILD_FAILED`, `BUNDLER_SEND_FAILED`, `BUNDLER_RECEIPT_FAILED` |
-| `TypeOrmAccountRepository.ts` | `DB_SAVE_FAILED`, `DB_QUERY_FAILED` |
-| `NhnKmsAdapter.ts` | `KMS_KEY_RETRIEVAL_FAILED`, `KMS_SIGNING_FAILED` |
-
-### 8.3 사용 예시
-
-```typescript
-// 인프라 어댑터의 catch 블록
-catch (error) {
-  wrapInfraError(error, "Failed to build UserOperation", ErrorCode.BUNDLER_BUILD_FAILED);
-}
-```
-
----
-
-## 9. Salt 해싱 유틸
+## 8. Salt 해싱 유틸
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/crypto.ts` |
 | 용도 | CREATE2 주소 계산 시 사용하는 salt를 keccak256 해싱 |
 
-### 9.1 구현
+### 8.1 구현
 
 ```typescript
 import { keccak256, AbiCoder } from "ethers";
@@ -459,7 +446,7 @@ export function hashSalt(salt: string): string {
 }
 ```
 
-### 9.2 적용 위치
+### 8.2 적용 위치
 
 | 파일 | 용도 |
 |------|------|
@@ -468,14 +455,14 @@ export function hashSalt(salt: string): string {
 
 ---
 
-## 10. 주소 정규화
+## 9. 주소 정규화
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/address.ts` |
 | 용도 | EVM 주소를 소문자로 정규화하여 대소문자 불일치 방지 |
 
-### 10.1 구현
+### 9.1 구현
 
 ```typescript
 export function normalizeAddress(address: string): string {
@@ -483,7 +470,7 @@ export function normalizeAddress(address: string): string {
 }
 ```
 
-### 10.2 적용 위치
+### 9.2 적용 위치
 
 | 파일 | 용도 |
 |------|------|
@@ -494,14 +481,121 @@ export function normalizeAddress(address: string): string {
 
 ---
 
-## 11. 로거
+# C. 메시징
+
+---
+
+## 10. Kafka 토픽 상수
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/shared/topics.ts` |
+| 용도 | 모든 Kafka 토픽을 중앙 관리하여 하드코딩 방지 |
+
+### 10.1 토픽 정의
+
+```typescript
+export const Topics = {
+  // Inbound (Subscribe)
+  ACCOUNT_CREATE:     "adapter.account.create",
+  DEPOSIT_CONFIRM:    "adapter.deposit.confirm",
+  WITHDRAW_REQUEST:   "adapter.withdraw.request",
+  WITHDRAW_STATUS:    "adapter.withdraw.status",
+
+  // Outbound (Publish)
+  ACCOUNT_CREATED:    "adapter.account.created",
+  DEPOSIT_DETECTED:   "adapter.deposit.detected",
+  DEPOSIT_CONFIRMED:  "adapter.deposit.confirmed",
+  WITHDRAW_SENT:      "adapter.withdraw.sent",
+  WITHDRAW_CONFIRMED: "adapter.withdraw.confirmed",
+} as const;
+```
+
+### 10.2 사용 위치
+
+| 파일 | 용도 |
+|------|------|
+| `app.ts` | Consumer 등록 — `Topics.ACCOUNT_CREATE`, `Topics.DEPOSIT_CONFIRM`, `Topics.WITHDRAW_REQUEST`, `Topics.WITHDRAW_STATUS` |
+| `AccountService.ts` | withErrorHandling topic + 성공 publish — `Topics.ACCOUNT_CREATED` |
+| `DepositService.ts` | withErrorHandling topic + 성공 publish — `Topics.DEPOSIT_CONFIRMED`, `Topics.DEPOSIT_DETECTED` |
+| `WithdrawService.ts` | withErrorHandling topic + 성공 publish — `Topics.WITHDRAW_SENT`, `Topics.WITHDRAW_CONFIRMED` |
+
+---
+
+## 11. Kafka 토픽 라우팅
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/adapter/in/kafka/KafkaConsumerAdapter.ts` |
+| 용도 | 토픽별 핸들러 등록 및 메시지 디스패치 |
+
+### 11.1 등록-디스패치 패턴
+
+```
+register(topic, handler)  →  Map<topic, handler>에 저장
+start()                   →  모든 토픽 subscribe → eachMessage에서 topic별 dispatch
+```
+
+### 11.2 토픽-핸들러 매핑
+
+| 토픽 | 핸들러 | 서비스 |
+|------|--------|--------|
+| `Topics.ACCOUNT_CREATE` | `accountService.createAccount` | AccountService |
+| `Topics.DEPOSIT_CONFIRM` | `depositService.checkConfirm` | DepositService |
+| `Topics.WITHDRAW_REQUEST` | `withdrawService.withdraw` | WithdrawService |
+| `Topics.WITHDRAW_STATUS` | `withdrawService.checkStatus` | WithdrawService |
+
+### 11.3 Consumer 에러 처리
+
+| 에러 타입 | 처리 |
+|----------|------|
+| `AppError` | `logger.error("{에러명} [{에러코드}] on {토픽}: {메시지}")` |
+| 기타 | `logger.error("Unexpected error processing {토픽}:", err)` |
+
+에러 발생 시에도 Consumer는 중단되지 않고 다음 메시지를 계속 처리합니다.
+
+---
+
+## 12. AsyncAPI 데코레이터
+
+| 항목 | 내용 |
+|------|------|
+| 파일 | `src/asyncapi/decorators.ts` |
+| 용도 | Kafka 채널 메타데이터 선언 (런타임 no-op, 문서화 용도) |
+
+### 12.1 데코레이터 목록
+
+| 데코레이터 | 대상 | 설명 |
+|-----------|------|------|
+| `@AsyncApi(opts)` | 클래스 | API 루트 메타데이터 (title, version, server) |
+| `@Subscribe(opts)` | 메서드 | Inbound 채널 — 외부에서 받는 메시지 (Kafka consume) |
+| `@Publish(opts)` | 메서드 | Outbound 채널 — 외부로 보내는 메시지 (Kafka produce) |
+
+### 12.2 옵션
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| channel | string | Kafka 토픽명 |
+| operationId | string | 오퍼레이션 식별자 |
+| summary | string | 간단 설명 |
+| description | string | 상세 설명 |
+
+런타임에는 아무 동작도 하지 않습니다. 코드 가독성 및 AsyncAPI 문서 생성용입니다.
+
+---
+
+# D. 인프라 공통
+
+---
+
+## 13. 로거
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/logger.ts` |
 | 용도 | 모듈별 prefix가 포함된 로거 팩토리 |
 
-### 11.1 인터페이스 및 구현
+### 13.1 인터페이스 및 구현
 
 ```typescript
 export interface Logger {
@@ -524,7 +618,7 @@ export function createLogger(label: string): Logger {
 
 `Logger` 인터페이스를 export하므로, 운영 환경 전환 시 이 한 곳만 winston/pino로 교체하면 전체 적용 가능합니다.
 
-### 11.2 모듈별 로거 label
+### 13.2 모듈별 로거 label
 
 | label | 사용 파일 |
 |-------|----------|
@@ -541,14 +635,14 @@ withErrorHandling 래퍼도 `createLogger(label)`을 내부에서 생성하여 �
 
 ---
 
-## 12. Retry 유틸
+## 14. Retry 유틸
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/shared/retry.ts` |
 | 용도 | 외부 서비스 호출 시 exponential backoff 재시도 |
 
-### 12.1 구현
+### 14.1 구현
 
 ```typescript
 import { createLogger } from "./logger";
@@ -580,7 +674,7 @@ export async function withRetry<T>(
 }
 ```
 
-### 12.2 Retry 정책
+### 14.2 Retry 정책
 
 | 대상 | 최대 재시도 | 대기 간격 | 비고 |
 |------|-----------|----------|------|
@@ -588,7 +682,7 @@ export async function withRetry<T>(
 | Bundler 호출 | 3회 | 1초 × attempt | exponential backoff |
 | KMS 호출 | 2회 | 500ms × attempt | 서명 키 조회는 빠른 실패 선호 |
 
-### 12.3 적용 위치
+### 14.3 적용 위치
 
 | 어댑터 | 호출 | label |
 |--------|------|-------|
@@ -605,65 +699,7 @@ export async function withRetry<T>(
 
 ---
 
-## 13. Kafka 토픽 라우팅
-
-| 항목 | 내용 |
-|------|------|
-| 파일 | `src/adapter/in/kafka/KafkaConsumerAdapter.ts` |
-| 용도 | 토픽별 핸들러 등록 및 메시지 디스패치 |
-
-### 13.1 등록-디스패치 패턴
-
-```
-register(topic, handler)  →  Map<topic, handler>에 저장
-start()                   →  모든 토픽 subscribe → eachMessage에서 topic별 dispatch
-```
-
-### 13.2 토픽-핸들러 매핑
-
-| 토픽 | 핸들러 | 서비스 |
-|------|--------|--------|
-| `Topics.ACCOUNT_CREATE` | `accountService.createAccount` | AccountService |
-| `Topics.DEPOSIT_CONFIRM` | `depositService.checkConfirm` | DepositService |
-| `Topics.WITHDRAW_REQUEST` | `withdrawService.withdraw` | WithdrawService |
-| `Topics.WITHDRAW_STATUS` | `withdrawService.checkStatus` | WithdrawService |
-
-### 13.3 Consumer 에러 처리
-
-| 에러 타입 | 처리 |
-|----------|------|
-| `AppError` | `logger.error("{에러명} [{에러코드}] on {토픽}: {메시지}")` |
-| 기타 | `logger.error("Unexpected error processing {토픽}:", err)` |
-
-에러 발생 시에도 Consumer는 중단되지 않고 다음 메시지를 계속 처리합니다.
-
----
-
-## 14. AsyncAPI 데코레이터
-
-| 항목 | 내용 |
-|------|------|
-| 파일 | `src/asyncapi/decorators.ts` |
-| 용도 | Kafka 채널 메타데이터 선언 (런타임 no-op, 문서화 용도) |
-
-### 14.1 데코레이터 목록
-
-| 데코레이터 | 대상 | 설명 |
-|-----------|------|------|
-| `@AsyncApi(opts)` | 클래스 | API 루트 메타데이터 (title, version, server) |
-| `@Subscribe(opts)` | 메서드 | Inbound 채널 — 외부에서 받는 메시지 (Kafka consume) |
-| `@Publish(opts)` | 메서드 | Outbound 채널 — 외부로 보내는 메시지 (Kafka produce) |
-
-### 14.2 옵션
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| channel | string | Kafka 토픽명 |
-| operationId | string | 오퍼레이션 식별자 |
-| summary | string | 간단 설명 |
-| description | string | 상세 설명 |
-
-런타임에는 아무 동작도 하지 않습니다. 코드 가독성 및 AsyncAPI 문서 생성용입니다.
+# E. 시스템 구성
 
 ---
 
@@ -768,6 +804,10 @@ SIGINT / SIGTERM 수신
 
 ---
 
+# F. 부록
+
+---
+
 ## 17. 공통 모듈 호출 흐름
 
 모든 Kafka 기반 유스케이스가 따르는 공통 처리 흐름:
@@ -830,8 +870,8 @@ graph TD
 
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
-| [Kafka 토픽 상수](#5-kafka-토픽-상수) | 9개 토픽이 13곳에 문자열 하드코딩 | `Topics` 상수 객체로 일원화 | `shared/topics.ts` 신규, `app.ts`, `AccountService.ts`, `DepositService.ts`, `WithdrawService.ts` |
-| [인프라 에러 래핑](#8-인프라-에러-래핑-유틸) | 4개 메서드에서 동일한 catch 블록 반복 | `wrapInfraError()` 유틸로 통일 | `shared/errors.ts` 추가, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `TypeOrmAccountRepository.ts`, `NhnKmsAdapter.ts` |
+| [Kafka 토픽 상수](#10-kafka-토픽-상수) | 9개 토픽이 13곳에 문자열 하드코딩 | `Topics` 상수 객체로 일원화 | `shared/topics.ts` 신규, `app.ts`, `AccountService.ts`, `DepositService.ts`, `WithdrawService.ts` |
+| [인프라 에러 래핑](#2-인프라-에러-래핑-유틸) | 4개 메서드에서 동일한 catch 블록 반복 | `wrapInfraError()` 유틸로 통일 | `shared/errors.ts` 추가, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `TypeOrmAccountRepository.ts`, `NhnKmsAdapter.ts` |
 | [체인 타입 및 검증](#6-체인-타입-및-검증) | 전부 `string`, 런타임 검증 없음 | `Chain` 타입 + `validateChain()` + `CHAIN_IDS` | `shared/chain.ts` 신규, `app.ts` (진입점 검증), `ERC4337BundlerAdapter.ts`, `asyncapi/messages/common.ts` (re-export) |
 
 #### 우선순위 중간 — 완료
@@ -839,15 +879,15 @@ graph TD
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
 | [체인 Provider 레지스트리](#7-체인-provider-레지스트리) | 동일한 `Map<string, JsonRpcProvider>` 캐싱 3중 중복 | `ChainProviderRegistry` 클래스 | `shared/ChainProviderRegistry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
-| [Salt 해싱](#9-salt-해싱-유틸) | `keccak256(AbiCoder.encode(...))` 2군데 중복 | `hashSalt()` 유틸 | `shared/crypto.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
-| [주소 정규화](#10-주소-정규화) | `DepositService`만 toLowerCase, `WithdrawService`는 미적용 | Repository 레벨에서 항상 정규화 + 서비스에서도 호출 | `shared/address.ts` 신규, `TypeOrmAccountRepository.ts`, `DepositService.ts`, `WithdrawService.ts` |
+| [Salt 해싱](#8-salt-해싱-유틸) | `keccak256(AbiCoder.encode(...))` 2군데 중복 | `hashSalt()` 유틸 | `shared/crypto.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
+| [주소 정규화](#9-주소-정규화) | `DepositService`만 toLowerCase, `WithdrawService`는 미적용 | Repository 레벨에서 항상 정규화 + 서비스에서도 호출 | `shared/address.ts` 신규, `TypeOrmAccountRepository.ts`, `DepositService.ts`, `WithdrawService.ts` |
 
 #### 우선순위 낮음 — 완료
 
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
-| [로거](#11-로거) | `console.log/error` + prefix 직접 사용 | `createLogger(label)` 팩토리 + `Logger` 인터페이스 전체 적용 | `shared/logger.ts` 신규, 전체 서비스 및 어댑터 (11개 파일) |
-| [Retry](#12-retry-유틸) | 외부 호출 1회 시도 후 즉시 실패 | `withRetry()` — exponential backoff | `shared/retry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `NhnKmsAdapter.ts` |
+| [로거](#13-로거) | `console.log/error` + prefix 직접 사용 | `createLogger(label)` 팩토리 + `Logger` 인터페이스 전체 적용 | `shared/logger.ts` 신규, 전체 서비스 및 어댑터 (11개 파일) |
+| [Retry](#14-retry-유틸) | 외부 호출 1회 시도 후 즉시 실패 | `withRetry()` — exponential backoff | `shared/retry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `NhnKmsAdapter.ts` |
 
 ---
 
