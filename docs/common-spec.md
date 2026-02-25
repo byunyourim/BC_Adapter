@@ -5,7 +5,7 @@
 | 시스템명 | BC Adapter (Blockchain Adapter) |
 | 버전 | 1.1.0 |
 | 작성일 | 2026-02-26 |
-| 경로 | `src/shared/`, `src/application/support/`, `src/config/` |
+| 경로 | `src/common/`, `src/application/support/`, `src/config/` |
 
 ---
 
@@ -57,7 +57,7 @@
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/errors.ts` |
+| 파일 | `src/common/errors.ts` |
 | 용도 | 전체 시스템 공통 에러 코드, 에러 클래스 정의, 인프라 에러 래핑 유틸 |
 
 ### 1.1 에러 코드 상수 (`ErrorCode`)
@@ -82,7 +82,29 @@
 | **Business** | `BUSINESS_ERROR` | 비즈니스 로직 에러 |
 | **Unknown** | `UNKNOWN_ERROR` | 분류 불가 에러 |
 
-### 1.2 에러 클래스 계층
+### 1.2 에러 메시지 상수 (`ErrorMessage`)
+
+| 에러 코드 | 메시지 |
+|-----------|--------|
+| `VALIDATION_ERROR` | Validation failed |
+| `MISSING_REQUIRED_FIELDS` | Required fields are missing |
+| `UNSUPPORTED_CHAIN` | The specified blockchain chain is not supported |
+| `NOT_FOUND` | Requested resource not found |
+| `ACCOUNT_NOT_FOUND` | Account is not registered |
+| `KMS_KEY_RETRIEVAL_FAILED` | Failed to retrieve signing key from KMS |
+| `KMS_SIGNING_FAILED` | Failed to sign data via KMS |
+| `RPC_CONNECTION_FAILED` | Blockchain RPC connection failed |
+| `RPC_NOT_CONFIGURED` | RPC URL is not configured for the chain |
+| `BUNDLER_BUILD_FAILED` | Failed to build UserOperation |
+| `BUNDLER_SEND_FAILED` | Failed to send UserOperation to bundler |
+| `BUNDLER_RECEIPT_FAILED` | Failed to retrieve UserOperation receipt |
+| `BUNDLER_NOT_CONFIGURED` | Bundler URL is not configured for the chain |
+| `DB_SAVE_FAILED` | Failed to save data to database |
+| `DB_QUERY_FAILED` | Failed to query data from database |
+| `BUSINESS_ERROR` | Business logic error occurred |
+| `UNKNOWN_ERROR` | An unexpected error occurred |
+
+### 1.3 에러 클래스 계층
 
 ```
 AppError (base)
@@ -95,7 +117,7 @@ AppError (base)
 └── InfrastructureError  → KMS_*, RPC_*, BUNDLER_*, DB_*
 ```
 
-### 1.3 사용 패턴
+### 1.4 사용 패턴
 
 ```typescript
 // 커스텀 에러 코드로 throw
@@ -122,7 +144,7 @@ catch (error) {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/errors.ts` (하단) |
+| 파일 | `src/common/errors.ts` (하단) |
 | 용도 | 인프라 어댑터의 catch 블록을 1줄로 통일 |
 
 ### 2.1 구현
@@ -167,7 +189,7 @@ catch (error) {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/response.ts` |
+| 파일 | `src/common/response.ts` |
 | 용도 | Kafka 응답 메시지의 성공/실패 형식 통일 |
 
 ### 3.1 `successResponse(requestId, data)`
@@ -236,7 +258,7 @@ function errorResponse(
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/validation.ts` |
+| 파일 | `src/common/validation.ts` |
 | 용도 | Kafka 메시지 수신 시 필수 필드 검증 |
 
 ### 4.1 `requireFields(data, fields)`
@@ -338,7 +360,7 @@ fn(req) 실행
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/chain.ts` |
+| 파일 | `src/common/chain.ts` |
 | 용도 | 지원 체인 타입 정의, 런타임 검증, 체인 ID 상수 제공 |
 
 ### 6.1 타입 및 상수
@@ -372,7 +394,7 @@ export function validateChain(chain: string): asserts chain is Chain {
 |------|------|
 | `app.ts` | 4개 Kafka Consumer 핸들러 진입점에서 `validateChain()` 호출 |
 | `ERC4337BundlerAdapter.ts` | `computeUserOpHash()`에서 `validateChain()` + `CHAIN_IDS[chain]` 사용 |
-| `asyncapi/messages/common.ts` | `Chain` 타입 re-export (`export type { Chain } from '../../shared/chain'`) |
+| `asyncapi/messages/common.ts` | `Chain` 타입 re-export (`export type { Chain } from '../../common/chain'`) |
 
 ---
 
@@ -380,7 +402,7 @@ export function validateChain(chain: string): asserts chain is Chain {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/ChainProviderRegistry.ts` |
+| 파일 | `src/common/ChainProviderRegistry.ts` |
 | 용도 | 체인별 `JsonRpcProvider` 인스턴스를 캐싱하여 중복 생성 방지 |
 
 ### 7.1 구현
@@ -431,7 +453,7 @@ export class ChainProviderRegistry {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/crypto.ts` |
+| 파일 | `src/common/crypto.ts` |
 | 용도 | CREATE2 주소 계산 시 사용하는 salt를 keccak256 해싱 |
 
 ### 8.1 구현
@@ -459,7 +481,7 @@ export function hashSalt(salt: string): string {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/address.ts` |
+| 파일 | `src/common/address.ts` |
 | 용도 | EVM 주소를 소문자로 정규화하여 대소문자 불일치 방지 |
 
 ### 9.1 구현
@@ -489,7 +511,7 @@ export function normalizeAddress(address: string): string {
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/topics.ts` |
+| 파일 | `src/common/topics.ts` |
 | 용도 | 모든 Kafka 토픽을 중앙 관리하여 하드코딩 방지 |
 
 ### 10.1 토픽 정의
@@ -592,7 +614,7 @@ start()                   →  모든 토픽 subscribe → eachMessage에서 top
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/logger.ts` |
+| 파일 | `src/common/logger.ts` |
 | 용도 | 모듈별 prefix가 포함된 로거 팩토리 |
 
 ### 13.1 인터페이스 및 구현
@@ -639,7 +661,7 @@ withErrorHandling 래퍼도 `createLogger(label)`을 내부에서 생성하여 �
 
 | 항목 | 내용 |
 |------|------|
-| 파일 | `src/shared/retry.ts` |
+| 파일 | `src/common/retry.ts` |
 | 용도 | 외부 서비스 호출 시 exponential backoff 재시도 |
 
 ### 14.1 구현
@@ -816,11 +838,11 @@ SIGINT / SIGTERM 수신
 [Kafka Message 수신]
     │
     ▼
-requireFields()              ← src/shared/validation.ts
+requireFields()              ← src/common/validation.ts
     │ 실패 → ValidationError 로깅 (Consumer에서 catch)
     │
     ▼
-validateChain()              ← src/shared/chain.ts
+validateChain()              ← src/common/chain.ts
     │ 실패 → ValidationError (UNSUPPORTED_CHAIN)
     │
     ▼
@@ -828,11 +850,11 @@ Service 메서드 실행
     │ (withErrorHandling 래퍼 적용)
     │
     ├── 성공
-    │   └── successResponse(requestId, data)    ← src/shared/response.ts
+    │   └── successResponse(requestId, data)    ← src/common/response.ts
     │       └── publisher.publish(Topics.XXX, response)
     │
     └── 에러
-        └── errorResponse(requestId, err, extra) ← src/shared/response.ts
+        └── errorResponse(requestId, err, extra) ← src/common/response.ts
             └── publisher.publish(Topics.XXX, response) ← withErrorHandling 자동 처리
 ```
 
@@ -870,24 +892,24 @@ graph TD
 
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
-| [Kafka 토픽 상수](#10-kafka-토픽-상수) | 9개 토픽이 13곳에 문자열 하드코딩 | `Topics` 상수 객체로 일원화 | `shared/topics.ts` 신규, `app.ts`, `AccountService.ts`, `DepositService.ts`, `WithdrawService.ts` |
-| [인프라 에러 래핑](#2-인프라-에러-래핑-유틸) | 4개 메서드에서 동일한 catch 블록 반복 | `wrapInfraError()` 유틸로 통일 | `shared/errors.ts` 추가, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `TypeOrmAccountRepository.ts`, `NhnKmsAdapter.ts` |
-| [체인 타입 및 검증](#6-체인-타입-및-검증) | 전부 `string`, 런타임 검증 없음 | `Chain` 타입 + `validateChain()` + `CHAIN_IDS` | `shared/chain.ts` 신규, `app.ts` (진입점 검증), `ERC4337BundlerAdapter.ts`, `asyncapi/messages/common.ts` (re-export) |
+| [Kafka 토픽 상수](#10-kafka-토픽-상수) | 9개 토픽이 13곳에 문자열 하드코딩 | `Topics` 상수 객체로 일원화 | `common/topics.ts` 신규, `app.ts`, `AccountService.ts`, `DepositService.ts`, `WithdrawService.ts` |
+| [인프라 에러 래핑](#2-인프라-에러-래핑-유틸) | 4개 메서드에서 동일한 catch 블록 반복 | `wrapInfraError()` 유틸로 통일 | `common/errors.ts` 추가, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `TypeOrmAccountRepository.ts`, `NhnKmsAdapter.ts` |
+| [체인 타입 및 검증](#6-체인-타입-및-검증) | 전부 `string`, 런타임 검증 없음 | `Chain` 타입 + `validateChain()` + `CHAIN_IDS` | `common/chain.ts` 신규, `app.ts` (진입점 검증), `ERC4337BundlerAdapter.ts`, `asyncapi/messages/common.ts` (re-export) |
 
 #### 우선순위 중간 — 완료
 
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
-| [체인 Provider 레지스트리](#7-체인-provider-레지스트리) | 동일한 `Map<string, JsonRpcProvider>` 캐싱 3중 중복 | `ChainProviderRegistry` 클래스 | `shared/ChainProviderRegistry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
-| [Salt 해싱](#8-salt-해싱-유틸) | `keccak256(AbiCoder.encode(...))` 2군데 중복 | `hashSalt()` 유틸 | `shared/crypto.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
-| [주소 정규화](#9-주소-정규화) | `DepositService`만 toLowerCase, `WithdrawService`는 미적용 | Repository 레벨에서 항상 정규화 + 서비스에서도 호출 | `shared/address.ts` 신규, `TypeOrmAccountRepository.ts`, `DepositService.ts`, `WithdrawService.ts` |
+| [체인 Provider 레지스트리](#7-체인-provider-레지스트리) | 동일한 `Map<string, JsonRpcProvider>` 캐싱 3중 중복 | `ChainProviderRegistry` 클래스 | `common/ChainProviderRegistry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
+| [Salt 해싱](#8-salt-해싱-유틸) | `keccak256(AbiCoder.encode(...))` 2군데 중복 | `hashSalt()` 유틸 | `common/crypto.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts` |
+| [주소 정규화](#9-주소-정규화) | `DepositService`만 toLowerCase, `WithdrawService`는 미적용 | Repository 레벨에서 항상 정규화 + 서비스에서도 호출 | `common/address.ts` 신규, `TypeOrmAccountRepository.ts`, `DepositService.ts`, `WithdrawService.ts` |
 
 #### 우선순위 낮음 — 완료
 
 | 모듈 | 개선 전 | 개선 후 | 적용 파일 |
 |------|--------|--------|----------|
-| [로거](#13-로거) | `console.log/error` + prefix 직접 사용 | `createLogger(label)` 팩토리 + `Logger` 인터페이스 전체 적용 | `shared/logger.ts` 신규, 전체 서비스 및 어댑터 (11개 파일) |
-| [Retry](#14-retry-유틸) | 외부 호출 1회 시도 후 즉시 실패 | `withRetry()` — exponential backoff | `shared/retry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `NhnKmsAdapter.ts` |
+| [로거](#13-로거) | `console.log/error` + prefix 직접 사용 | `createLogger(label)` 팩토리 + `Logger` 인터페이스 전체 적용 | `common/logger.ts` 신규, 전체 서비스 및 어댑터 (11개 파일) |
+| [Retry](#14-retry-유틸) | 외부 호출 1회 시도 후 즉시 실패 | `withRetry()` — exponential backoff | `common/retry.ts` 신규, `EthersBlockchainAdapter.ts`, `ERC4337BundlerAdapter.ts`, `NhnKmsAdapter.ts` |
 
 ---
 
@@ -906,16 +928,16 @@ graph TD
 
 | 파일 | 분류 | 내용 |
 |------|------|------|
-| `src/shared/errors.ts` | 수정 | 에러 코드, 에러 클래스 계층, `wrapInfraError` 유틸 |
-| `src/shared/response.ts` | 기존 | `successResponse`, `errorResponse` |
-| `src/shared/validation.ts` | 기존 | `requireFields` |
-| `src/shared/topics.ts` | 신규 | Kafka 토픽 상수 9개 |
-| `src/shared/chain.ts` | 신규 | `Chain` 타입, `CHAIN_IDS`, `validateChain` |
-| `src/shared/ChainProviderRegistry.ts` | 신규 | `JsonRpcProvider` 캐싱 공통 클래스 |
-| `src/shared/crypto.ts` | 신규 | `hashSalt` |
-| `src/shared/address.ts` | 신규 | `normalizeAddress` |
-| `src/shared/logger.ts` | 신규 | `createLogger` 팩토리 + `Logger` 인터페이스 |
-| `src/shared/retry.ts` | 신규 | `withRetry` (exponential backoff) |
+| `src/common/errors.ts` | 수정 | 에러 코드, 에러 클래스 계층, `wrapInfraError` 유틸 |
+| `src/common/response.ts` | 기존 | `successResponse`, `errorResponse` |
+| `src/common/validation.ts` | 기존 | `requireFields` |
+| `src/common/topics.ts` | 신규 | Kafka 토픽 상수 9개 |
+| `src/common/chain.ts` | 신규 | `Chain` 타입, `CHAIN_IDS`, `validateChain` |
+| `src/common/ChainProviderRegistry.ts` | 신규 | `JsonRpcProvider` 캐싱 공통 클래스 |
+| `src/common/crypto.ts` | 신규 | `hashSalt` |
+| `src/common/address.ts` | 신규 | `normalizeAddress` |
+| `src/common/logger.ts` | 신규 | `createLogger` 팩토리 + `Logger` 인터페이스 |
+| `src/common/retry.ts` | 신규 | `withRetry` (exponential backoff) |
 | `src/application/support/withErrorHandling.ts` | 수정 | 에러 핸들링 래퍼 (logger 적용) |
 
 ---
@@ -937,4 +959,4 @@ graph TD
 | `src/adapter/out/kms/NhnKmsAdapter.ts` | wrapInfraError, withRetry, logger |
 | `src/adapter/out/kms/MockKmsAdapter.ts` | logger |
 | `src/adapter/out/persistence/TypeOrmAccountRepository.ts` | wrapInfraError, normalizeAddress |
-| `src/asyncapi/messages/common.ts` | Chain (shared/chain.ts re-export) |
+| `src/asyncapi/messages/common.ts` | Chain (common/chain.ts re-export) |

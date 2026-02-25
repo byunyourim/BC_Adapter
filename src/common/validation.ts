@@ -8,6 +8,6 @@ export function requireFields(
     (f) => data[f] === undefined || data[f] === null || data[f] === "",
   );
   if (missing.length > 0) {
-    throw new ValidationError(`Missing required fields: ${missing.join(", ")}`, ErrorCode.MISSING_REQUIRED_FIELDS);
+    throw new ValidationError(ErrorCode.MISSING_REQUIRED_FIELDS, missing.join(", "));
   }
 }
