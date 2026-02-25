@@ -73,7 +73,7 @@ graph TB
 
     AS --> KMS
     WS --> KMS
-    KMS --> NHNKMS
+    KMS -->|REST API - axios| NHNKMS
 ```
 
 ---
@@ -635,7 +635,7 @@ graph LR
         AS -->|1. findBySalt 중복확인| REPO[PrismaAccountRepository]
         REPO --> PG[(PostgreSQL)]
         AS -->|2. getSigningKey| KMS[KmsAdapter]
-        KMS --> NHNKMS[NHN Cloud KMS]
+        KMS -->|REST API| NHNKMS[NHN Cloud KMS]
         AS -->|3. computeAddress CREATE2| BC[EthersBlockchainAdapter]
         BC --> RPC[EVM Node RPC]
         AS -->|4. save| REPO
@@ -775,7 +775,7 @@ graph LR
         WS -->|1. findByAddress| REPO[PrismaAccountRepository]
         REPO --> PG[(PostgreSQL)]
         WS -->|2. getSigningKey| KMS[KmsAdapter]
-        KMS --> NHNKMS[NHN Cloud KMS]
+        KMS -->|REST API| NHNKMS[NHN Cloud KMS]
         WS -->|3. buildUserOp| BU[ERC4337BundlerAdapter]
         BU -->|getCode, getNonce, getFeeData| NODE[EVM Node RPC]
         BU -->|estimateGas| BSVC[Bundler Service]
@@ -867,7 +867,7 @@ graph LR
         WS -->|1. findByAddress| REPO[PrismaAccountRepository]
         REPO --> PG[(PostgreSQL)]
         WS -->|2. getSigningKey| KMS[KmsAdapter]
-        KMS --> NHNKMS[NHN Cloud KMS]
+        KMS -->|REST API| NHNKMS[NHN Cloud KMS]
         WS -->|3. buildUserOp ERC-20| BU[ERC4337BundlerAdapter]
         BU -->|getCode, getNonce, getFeeData| NODE[EVM Node RPC]
         BU -->|estimateGas| BSVC[Bundler Service]
