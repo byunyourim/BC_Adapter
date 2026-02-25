@@ -20,14 +20,13 @@
 6. [외부 인터페이스 - PostgreSQL](#6-외부-인터페이스---postgresql)
 7. [외부 인터페이스 - Redis](#7-외부-인터페이스---redis)
 8. [외부 인터페이스 - EVM RPC Node](#8-외부-인터페이스---evm-rpc-node)
-9. [외부 인터페이스 - ERC-4337 Bundler](#9-외부-인터페이스---erc-4337-bundler)
-10. [내부 인터페이스 - Inbound Port](#10-내부-인터페이스---inbound-port)
-11. [내부 인터페이스 - Outbound Port](#11-내부-인터페이스---outbound-port)
-12. [도메인 모델](#12-도메인-모델)
-13. [에러 코드 정의](#13-에러-코드-정의)
-14. [응답 형식 규격](#14-응답-형식-규격)
-15. [시퀀스 다이어그램](#15-시퀀스-다이어그램)
-16. [연동 시스템 목록](#16-연동-시스템-목록)
+9. [내부 인터페이스 - Inbound Port](#9-내부-인터페이스---inbound-port)
+10. [내부 인터페이스 - Outbound Port](#10-내부-인터페이스---outbound-port)
+11. [도메인 모델](#11-도메인-모델)
+12. [에러 코드 정의](#12-에러-코드-정의)
+13. [응답 형식 규격](#13-응답-형식-규격)
+14. [시퀀스 다이어그램](#14-시퀀스-다이어그램)
+15. [연동 시스템 목록](#15-연동-시스템-목록)
 
 ---
 
@@ -72,29 +71,7 @@ Kafka 메시지 기반의 비동기 인터페이스를 통해 다음 기능을 �
 
 ## 3. 외부 인터페이스 - Kafka 메시지
 
-### 3.1 토픽 총괄
-
-| No | 방향 | 토픽명 | 설명 | 트리거 |
-|----|------|--------|------|--------|
-| 1 | Inbound (Subscribe) | `adapter.account.create` | 계정 생성 요청 | Wallet Backend |
-| 2 | Outbound (Publish) | `adapter.account.created` | 계정 생성 결과 | AccountService |
-| 3 | Outbound (Publish) | `adapter.deposit.detected` | 입금 감지 알림 | DepositService |
-| 4 | Inbound (Subscribe) | `adapter.deposit.confirm` | 입금 컨펌 확인 요청 | Wallet Backend |
-| 5 | Outbound (Publish) | `adapter.deposit.confirmed` | 입금 컨펌 결과 | DepositService |
-| 6 | Inbound (Subscribe) | `adapter.withdraw.request` | 출금 요청 | Wallet Backend |
-| 7 | Outbound (Publish) | `adapter.withdraw.sent` | 출금 전송 결과 | WithdrawService |
-| 8 | Inbound (Subscribe) | `adapter.withdraw.status` | 출금 상태 확인 요청 | Wallet Backend |
-| 9 | Outbound (Publish) | `adapter.withdraw.confirmed` | 출금 최종 결과 | WithdrawService |
-
-### Kafka 설정
-
-| 항목 | 값 | 환경변수 |
-|------|-----|---------|
-| Client ID | `bc-adapter` | `KAFKA_CLIENT_ID` |
-| Group ID | `bc-adapter-group` | `KAFKA_GROUP_ID` |
-| Brokers | 쉼표 구분 | `KAFKA_BROKERS` |
-| Consumer offset | `fromBeginning: false` | - |
-
+du
 ---
 
 ### 3.2 IF-01: 계정 생성
@@ -141,7 +118,7 @@ Kafka 메시지 기반의 비동기 인터페이스를 통해 다음 기능을 �
 |------|------|------|
 | requestId | string | 요청 추적 ID |
 | error | string | 에러 메시지 |
-| errorCode | string | 에러 코드 ([9. 에러 코드 정의](#9-에러-코드-정의) 참조) |
+| errorCode | string | 에러 코드 ([12. 에러 코드 정의](#12-에러-코드-정의) 참조) |
 
 ```json
 {
@@ -845,6 +822,56 @@ BC Adapter는 EVM 호환 블록체인 노드와 JSON-RPC로 통신합니다.
 | maxFeePerGas | bigint | EIP-1559 최대 가스 수수료 |
 | maxPriorityFeePerGas | bigint | EIP-1559 최대 우선순위 수수료 |
 
+---
+
+### 8.6 IF-RPC-06: EntryPoint.handleOps (UserOperation 실행)
+
+| 항목 | 내용 |
+|------|------|
+| JSON-RPC Method | `eth_sendTransaction` (EntryPoint.handleOps) |
+| ethers.js | `entryPointContract.handleOps([userOp], beneficiary)` |
+| 호출 시점 | 출금/결제 시 서명된 UserOperation 온체인 제출 |
+
+> Bundler가 어댑터 프로세스 내부에 내장되어 있으므로, 별도 Bundler 서비스 없이 어댑터가 직접 EntryPoint 컨트랙트의 `handleOps`를 호출하여 UserOperation을 실행합니다.
+
+**요청:**
+
+| 파라미터 | 타입 | 설명 |
+|---------|------|------|
+| ops | UserOperation[] | 실행할 UserOperation 배열 |
+| beneficiary | address | 가스 환불 수신 주소 |
+
+**응답:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| transactionHash | string | 온체인 트랜잭션 해시 |
+| status | number | `1` (성공) / `0` (revert) |
+
+---
+
+### 8.7 IF-RPC-07: 가스 추정 (estimateGas)
+
+| 항목 | 내용 |
+|------|------|
+| JSON-RPC Method | `eth_estimateGas` |
+| ethers.js | `provider.estimateGas(tx)` |
+| 호출 시점 | 출금/결제 UserOperation 빌드 시 가스 한도 추정 |
+
+**요청:**
+
+| 파라미터 | 타입 | 설명 |
+|---------|------|------|
+| from | string | 트랜잭션 발신 주소 |
+| to | string | EntryPoint 컨트랙트 주소 |
+| data | string | handleOps 인코딩된 calldata |
+
+**응답:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| gasLimit | bigint | 추정 가스 한도 |
+
 **실패 시 에러 처리:**
 
 | 조건 | 에러 코드 | 에러 클래스 |
@@ -854,112 +881,11 @@ BC Adapter는 EVM 호환 블록체인 노드와 JSON-RPC로 통신합니다.
 
 ---
 
-## 9. 외부 인터페이스 - ERC-4337 Bundler
-
-BC Adapter는 ERC-4337 Bundler 서비스와 JSON-RPC로 통신하여 UserOperation을 처리합니다.
-
-| 항목 | 내용 |
-|------|------|
-| 프로토콜 | JSON-RPC over HTTPS |
-| 구현체 | `ERC4337BundlerAdapter` (`src/adapter/out/bundler/ERC4337BundlerAdapter.ts`) |
-
-### 환경변수
-
-| 환경변수 | 필수 | 설명 |
-|---------|------|------|
-| `ETH_BUNDLER_URL` | - | Ethereum Mainnet Bundler URL |
-| `POLYGON_BUNDLER_URL` | - | Polygon Mainnet Bundler URL |
-| `SEPOLIA_BUNDLER_URL` | - | Sepolia Testnet Bundler URL |
-
-> 사용하려는 체인의 Bundler URL이 미설정이면 `BUNDLER_NOT_CONFIGURED` 에러가 발생합니다.
-
-### 9.1 IF-BUNDLER-01: UserOperation 가스 추정
-
-| 항목 | 내용 |
-|------|------|
-| JSON-RPC Method | `eth_estimateUserOperationGas` |
-| 호출 시점 | 출금/결제 UserOperation 빌드 |
-
-**요청:**
-
-| 파라미터 | 타입 | 설명 |
-|---------|------|------|
-| userOp | UserOperation | 서명 전 UserOperation 객체 |
-| entryPoint | string | EntryPoint 컨트랙트 주소 |
-
-**응답:**
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| callGasLimit | string | 실행 가스 한도 |
-| verificationGasLimit | string | 검증 가스 한도 |
-| preVerificationGas | string | 사전 검증 가스 |
-
----
-
-### 9.2 IF-BUNDLER-02: UserOperation 전송
-
-| 항목 | 내용 |
-|------|------|
-| JSON-RPC Method | `eth_sendUserOperation` |
-| 호출 시점 | 출금/결제 서명 완료 후 전송 |
-
-**요청:**
-
-| 파라미터 | 타입 | 설명 |
-|---------|------|------|
-| userOp | UserOperation | 서명된 UserOperation 객체 |
-| entryPoint | string | EntryPoint 컨트랙트 주소 |
-
-**응답:**
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| userOpHash | string | Bundler가 반환한 UserOperation 해시 |
-
----
-
-### 9.3 IF-BUNDLER-03: UserOperation 영수증 조회
-
-| 항목 | 내용 |
-|------|------|
-| JSON-RPC Method | `eth_getUserOperationReceipt` |
-| 호출 시점 | 출금 상태 확인 |
-
-**요청:**
-
-| 파라미터 | 타입 | 설명 |
-|---------|------|------|
-| userOpHash | string | 확인할 UserOperation 해시 |
-
-**응답:**
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| userOpHash | string | UserOperation 해시 |
-| success | boolean | 실행 성공 여부 |
-| actualGasCost | string | 실제 가스 비용 (wei) |
-| actualGasUsed | string | 실제 가스 사용량 |
-| receipt.transactionHash | string | 온체인 트랜잭션 해시 |
-
-> 아직 처리되지 않은 UserOperation이면 `null`을 반환합니다.
-
-**실패 시 에러 처리:**
-
-| 조건 | 에러 코드 | 에러 클래스 |
-|------|-----------|-----------|
-| Bundler URL 미설정 | `BUNDLER_NOT_CONFIGURED` | `InfrastructureError` |
-| 가스 추정 실패 | `BUNDLER_BUILD_FAILED` | `InfrastructureError` |
-| UserOp 전송 실패 | `BUNDLER_SEND_FAILED` | `InfrastructureError` |
-| 영수증 조회 실패 | `BUNDLER_RECEIPT_FAILED` | `InfrastructureError` |
-
----
-
-## 10. 내부 인터페이스 - Inbound Port
+## 9. 내부 인터페이스 - Inbound Port
 
 Inbound Port는 외부 어댑터(Kafka Consumer, WebSocket)가 호출하는 유스케이스 인터페이스입니다.
 
-### 10.1 CreateAccountUseCase
+### 9.1 CreateAccountUseCase
 
 | 항목 | 내용 |
 |------|------|
@@ -985,7 +911,7 @@ interface CreateAccountUseCase {
 
 ---
 
-### 10.2 HandleDepositUseCase
+### 9.2 HandleDepositUseCase
 
 | 항목 | 내용 |
 |------|------|
@@ -1012,7 +938,7 @@ interface HandleDepositUseCase {
 
 ---
 
-### 10.3 CheckConfirmUseCase
+### 9.3 CheckConfirmUseCase
 
 | 항목 | 내용 |
 |------|------|
@@ -1038,7 +964,7 @@ interface CheckConfirmUseCase {
 
 ---
 
-### 10.4 WithdrawUseCase
+### 9.4 WithdrawUseCase
 
 | 항목 | 내용 |
 |------|------|
@@ -1075,11 +1001,11 @@ interface WithdrawUseCase {
 
 ---
 
-## 11. 내부 인터페이스 - Outbound Port
+## 10. 내부 인터페이스 - Outbound Port
 
 Outbound Port는 애플리케이션 서비스가 외부 시스템에 접근할 때 사용하는 인터페이스입니다.
 
-### 11.1 AccountRepository
+### 10.1 AccountRepository
 
 | 항목 | 내용 |
 |------|------|
@@ -1103,7 +1029,7 @@ interface AccountRepository {
 
 ---
 
-### 11.2 BlockchainPort
+### 10.2 BlockchainPort
 
 | 항목 | 내용 |
 |------|------|
@@ -1143,13 +1069,13 @@ interface BlockchainPort {
 
 ---
 
-### 11.3 BundlerPort
+### 10.3 BundlerPort
 
 | 항목 | 내용 |
 |------|------|
 | 파일 | `src/domain/port/out/BundlerPort.ts` |
-| 구현체 | `ERC4337BundlerAdapter` |
-| 연동 시스템 | ERC-4337 Bundler Service, EVM RPC Node |
+| 구현체 | `ERC4337BundlerAdapter` (어댑터 프로세스 내장) |
+| 연동 시스템 | EVM RPC Node (EntryPoint 컨트랙트 직접 호출) |
 
 ```typescript
 interface UserOperationReceipt {
@@ -1184,8 +1110,8 @@ interface BundlerPort {
 | 메서드 | 파라미터 | 반환 | 설명 |
 |--------|---------|------|------|
 | `buildUserOperation` | 체인, 주소, 금액 등 | `Promise<{ userOp, userOpHash }>` | UserOperation 빌드 (가스 추정, nonce 조회 포함) |
-| `sendUserOperation` | `chain, userOp` | `Promise<string>` | Bundler에 서명된 UserOp 전송. userOpHash 반환 |
-| `getUserOperationReceipt` | `chain, userOpHash` | `Promise<Receipt \| null>` | UserOp 실행 영수증 조회. 미처리 시 null |
+| `sendUserOperation` | `chain, userOp` | `Promise<string>` | EntryPoint.handleOps로 직접 온체인 제출. txHash 반환 |
+| `getUserOperationReceipt` | `chain, userOpHash` | `Promise<Receipt \| null>` | 트랜잭션 영수증 조회. 미처리 시 null |
 
 **buildUserOperation 처리 흐름:**
 
@@ -1193,13 +1119,13 @@ interface BundlerPort {
 2. `getCode(sender)`로 스마트 컨트랙트 배포 여부 확인
 3. 미배포 시 `initCode` 생성 (factory + createAccount)
 4. 파라미터로 전달받은 `nonce` 사용 (Redis에서 사전 획득)
-5. `eth_estimateUserOperationGas`로 가스 추정
+5. `eth_estimateGas`로 가스 한도 추정
 6. `getFeeData()`로 가스 가격 조회
 7. `userOpHash` 계산 (keccak256 패킹)
 
 ---
 
-### 11.4 KmsPort
+### 10.4 KmsPort
 
 | 항목 | 내용 |
 |------|------|
@@ -1229,7 +1155,7 @@ interface KmsPort {
 
 ---
 
-### 11.5 MessagePublisher
+### 10.5 MessagePublisher
 
 | 항목 | 내용 |
 |------|------|
@@ -1249,7 +1175,7 @@ interface MessagePublisher {
 
 ---
 
-### 11.6 NoncePort
+### 10.6 NoncePort
 
 | 항목 | 내용 |
 |------|------|
@@ -1292,9 +1218,9 @@ interface NoncePort {
 
 ---
 
-## 12. 도메인 모델
+## 11. 도메인 모델
 
-### 12.1 Account
+### 11.1 Account
 
 | 항목 | 내용 |
 |------|------|
@@ -1309,7 +1235,7 @@ interface NoncePort {
 | salt | string | O | - | CREATE2 파생 매개변수 |
 | createdAt | Date | 자동 | Auto Generate | 생성 일시 |
 
-### 12.2 UserOperation
+### 11.2 UserOperation
 
 | 항목 | 내용 |
 |------|------|
@@ -1332,7 +1258,7 @@ interface NoncePort {
 
 ---
 
-## 13. 에러 코드 정의
+## 12. 에러 코드 정의
 
 | 카테고리 | 에러 코드 | 설명 | HTTP 유사 |
 |----------|-----------|------|-----------|
@@ -1345,10 +1271,9 @@ interface NoncePort {
 | | `KMS_SIGNING_FAILED` | KMS 서명 실패 | 502 |
 | **Infrastructure - RPC** | `RPC_CONNECTION_FAILED` | 블록체인 RPC 연결 실패 | 502 |
 | | `RPC_NOT_CONFIGURED` | 체인의 RPC URL 미설정 | 500 |
-| **Infrastructure - Bundler** | `BUNDLER_BUILD_FAILED` | UserOperation 빌드 실패 | 502 |
-| | `BUNDLER_SEND_FAILED` | UserOperation 전송 실패 | 502 |
-| | `BUNDLER_RECEIPT_FAILED` | UserOperation 영수증 조회 실패 | 502 |
-| | `BUNDLER_NOT_CONFIGURED` | 체인의 Bundler URL 미설정 | 500 |
+| **Infrastructure - UserOp** | `BUNDLER_BUILD_FAILED` | UserOperation 빌드 실패 | 500 |
+| | `BUNDLER_SEND_FAILED` | UserOperation 온체인 제출 실패 (EntryPoint.handleOps) | 502 |
+| | `BUNDLER_RECEIPT_FAILED` | 트랜잭션 영수증 조회 실패 | 502 |
 | **Infrastructure - DB** | `DB_SAVE_FAILED` | 데이터베이스 저장 실패 | 500 |
 | | `DB_QUERY_FAILED` | 데이터베이스 조회 실패 | 500 |
 | **Infrastructure - Redis** | `NONCE_ACQUIRE_FAILED` | Redis nonce 획득 실패 | 502 |
@@ -1364,11 +1289,12 @@ AppError (base)
 ├── NotFoundError         → NOT_FOUND, ACCOUNT_NOT_FOUND
 ├── BusinessError         → BUSINESS_ERROR
 └── InfrastructureError   → KMS_*, RPC_*, BUNDLER_*, DB_*, NONCE_*
+    (BUNDLER_* = 내부 Bundler 어댑터 오류, 외부 서비스 아님)
 ```
 
 ---
 
-## 14. 응답 형식 규격
+## 13. 응답 형식 규격
 
 모든 Kafka 응답 메시지는 아래 규격을 따릅니다.
 
@@ -1387,7 +1313,7 @@ AppError (base)
 {
   requestId: string,       // 원본 요청의 requestId
   error: string,           // 에러 메시지
-  errorCode: string,       // 에러 코드 (9. 에러 코드 정의 참조)
+  errorCode: string,       // 에러 코드 (12. 에러 코드 정의 참조)
   ...extra                 // 인터페이스별 추가 컨텍스트 (선택)
 }
 ```
@@ -1411,9 +1337,9 @@ AppError (base)
 
 ---
 
-## 15. 시퀀스 다이어그램
+## 14. 시퀀스 다이어그램
 
-### 15.1 계정 생성 흐름
+### 14.1 계정 생성 흐름
 
 ```mermaid
 sequenceDiagram
@@ -1449,7 +1375,7 @@ sequenceDiagram
     K->>WB: consume(adapter.account.created)
 ```
 
-### 15.2 입금 감지 흐름
+### 14.2 입금 감지 흐름
 
 ```mermaid
 sequenceDiagram
@@ -1478,7 +1404,7 @@ sequenceDiagram
     end
 ```
 
-### 15.3 입금 컨펌 확인 흐름
+### 14.3 입금 컨펌 확인 흐름
 
 ```mermaid
 sequenceDiagram
@@ -1503,7 +1429,7 @@ sequenceDiagram
     K->>WB: 컨펌 결과
 ```
 
-### 15.4 출금 처리 흐름
+### 14.4 출금 처리 흐름
 
 ```mermaid
 sequenceDiagram
@@ -1513,7 +1439,7 @@ sequenceDiagram
     participant DB as AccountRepository
     participant KMS as KmsPort
     participant NP as NoncePort (Redis)
-    participant BU as BundlerPort
+    participant BU as BundlerPort (내장)
     participant PUB as MessagePublisher
 
     WB->>K: produce(adapter.withdraw.request)
@@ -1554,14 +1480,14 @@ sequenceDiagram
     K->>WB: 출금 전송 결과
 ```
 
-### 15.5 출금 상태 확인 흐름
+### 14.5 출금 상태 확인 흐름
 
 ```mermaid
 sequenceDiagram
     participant WB as Wallet Backend
     participant K as Kafka
     participant WS as WithdrawService
-    participant BU as BundlerPort
+    participant BU as BundlerPort (내장)
     participant PUB as MessagePublisher
 
     WB->>K: produce(adapter.withdraw.status)
@@ -1583,18 +1509,17 @@ sequenceDiagram
 
 ---
 
-## 16. 연동 시스템 목록
+## 15. 연동 시스템 목록
 
 | No | 시스템 | 프로토콜 | 용도 | 환경변수 |
 |----|--------|---------|------|---------|
 | 1 | **Apache Kafka** | TCP | 비동기 메시지 송수신 | `KAFKA_BROKERS` |
 | 2 | **PostgreSQL** | TCP | 계정 정보 영속화 | `DB_HOST`, `DB_PORT`, `DB_DATABASE` |
 | 3 | **Redis** | TCP | 출금/결제 nonce 관리 (원자적 획득/롤백) | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
-| 4 | **EVM RPC Node** | JSON-RPC/HTTPS | 블록체인 조회 (CREATE2, 컨펌 등) | `ETH_RPC_URL`, `POLYGON_RPC_URL`, `SEPOLIA_RPC_URL` |
-| 5 | **ERC-4337 Bundler** | JSON-RPC/HTTPS | UserOperation 가스 추정, 전송, 영수증 조회 | `ETH_BUNDLER_URL`, `POLYGON_BUNDLER_URL`, `SEPOLIA_BUNDLER_URL` |
-| 6 | **NHN Cloud KMS** | REST/HTTPS | 서명 키 조회 및 서명 생성 | `NHN_KMS_APP_KEY`, `NHN_KMS_SECRET_KEY`, `NHN_KMS_KEY_ID`, `NHN_KMS_ENDPOINT` |
-| 7 | **Deposit Listener** | WebSocket | 입금 이벤트 실시간 수신 | `WS_PORT` |
-| 8 | **Wallet Backend** | Kafka | 요청 발행 및 결과 수신 (호출자) | - |
+| 4 | **EVM RPC Node** | JSON-RPC/HTTPS | 블록체인 조회/트랜잭션 제출 (CREATE2, 컨펌, EntryPoint.handleOps 등) | `ETH_RPC_URL`, `POLYGON_RPC_URL`, `SEPOLIA_RPC_URL` |
+| 5 | **NHN Cloud KMS** | REST/HTTPS | 서명 키 조회 및 서명 생성 | `NHN_KMS_APP_KEY`, `NHN_KMS_SECRET_KEY`, `NHN_KMS_KEY_ID`, `NHN_KMS_ENDPOINT` |
+| 6 | **Deposit Listener** | WebSocket | 입금 이벤트 실시간 수신 | `WS_PORT` |
+| 7 | **Wallet Backend** | Kafka | 요청 발행 및 결과 수신 (호출자) | - |
 
 ### 스마트 컨트랙트 주소
 

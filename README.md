@@ -2,7 +2,57 @@
 
 Wallet backend ↔ EVM blockchain adapter via Kafka.
 
-계정 생성(CREATE2), 입금 감지, 트랜잭션 컨펌 체크, ERC-4337 출금을 Kafka 메시징과 WebSocket을 통해 처리한다.
+계정 생성(CREATE2), 입금 감지, 트랜잭션 컨펌 체크, ERC-4337 출금/결제를 Kafka 메시징과 WebSocket을 통해 처리한다.
+출금/결제 시 동시 요청에 의한 nonce 충돌을 방지하기 위해 Redis에서 nonce를 원자적으로 관리한다.
+
+---
+
+## 개요
+
+BC Adapter는 **Wallet Backend**가 블록체인을 직접 다루지 않아도 되도록, 중간에서 EVM 체인과의 모든 상호작용을 대행하는 어댑터 서비스이다.
+
+### 왜 필요한가
+
+Wallet Backend는 사용자 지갑, 잔액, 거래 내역 등 비즈니스 로직에 집중해야 한다. 블록체인 RPC 호출, 트랜잭션 서명, nonce 관리, 컨펌 대기 같은 인프라 관심사를 직접 다루면 복잡도가 급격히 올라간다. BC Adapter가 이 부분을 전담하여 Wallet Backend는 Kafka 메시지만 주고받으면 된다.
+
+### 무엇을 하는가
+
+| 기능 | 설명 |
+|------|------|
+| **계정 생성** | CREATE2로 스마트 컨트랙트 지갑 주소를 사전 계산하여 DB에 저장. 실제 배포는 첫 출금 시 자동 수행 |
+| **입금 감지** | Deposit Listener(별도 서비스)가 WebSocket으로 전달한 입금 이벤트를 수신, 등록된 주소인지 확인 후 Kafka로 알림 |
+| **입금 컨펌 확인** | Wallet Backend 요청 시 블록체인 RPC로 트랜잭션 컨펌 수를 조회하여 확정 여부 응답 |
+| **출금/결제** | ERC-4337 기반 UserOperation을 빌드 → 서명 → EntryPoint.handleOps로 직접 온체인 제출. ETH 전송과 ERC-20 토큰 전송 모두 지원 |
+| **출금 상태 확인** | 트랜잭션 영수증을 조회하여 성공/실패/처리중 상태 응답 |
+
+### 핵심 설계 결정
+
+- **Kafka 기반 비동기 통신**: Wallet Backend와의 모든 요청/응답은 Kafka 메시지로 처리. 서비스 간 결합도를 낮추고 장애 격리
+- **헥사고날 아키텍처**: 도메인 로직이 인프라(Kafka, DB, RPC)에 의존하지 않도록 Port & Adapter 패턴 적용
+- **Redis nonce 관리**: 동시 출금 요청 시 온체인 nonce 충돌을 방지하기 위해 Redis INCR로 원자적 관리. 실패 시 DECR로 롤백
+- **내장 Bundler**: 별도 Bundler 서비스 없이 어댑터 프로세스 내에서 직접 EntryPoint 컨트랙트 호출
+- **NHN Cloud KMS**: 서명 키를 어댑터가 보관하지 않고 외부 KMS에서 관리. 개발 환경용 MockKMS 제공
+
+### 연동 시스템
+
+```
+Wallet Backend ──Kafka──▶ BC Adapter ──RPC──▶ EVM Blockchain
+                              │
+                              ├── PostgreSQL (계정 정보)
+                              ├── Redis (nonce 관리)
+                              ├── NHN Cloud KMS (서명)
+                              └──◀── Deposit Listener (WebSocket)
+```
+
+### 지원 체인
+
+| 체인 | 설명 |
+|------|------|
+| Ethereum | 메인넷 |
+| Polygon | 메인넷 |
+| Sepolia | 이더리움 테스트넷 (개발/테스트용) |
+
+---
 
 ## Architecture
 
@@ -14,7 +64,7 @@ src/
 │   ├── model/        # Account, UserOperation 도메인 모델
 │   └── port/
 │       ├── in/       # 인바운드 유스케이스 (CreateAccount, HandleDeposit, CheckConfirm, Withdraw)
-│       └── out/      # 아웃바운드 포트 (Repository, KMS, Blockchain, Bundler, MessagePublisher)
+│       └── out/      # 아웃바운드 포트 (Repository, KMS, Blockchain, Bundler, Nonce, MessagePublisher)
 ├── application/      # 유스케이스 구현 — domain/port 인터페이스만 의존
 │   ├── AccountService.ts
 │   ├── DepositService.ts
@@ -27,7 +77,8 @@ src/
 │       ├── persistence/  # TypeORM (PostgreSQL)
 │       ├── messaging/    # Kafka producer
 │       ├── blockchain/   # ethers.js (RPC, CREATE2, confirm)
-│       ├── bundler/      # ERC-4337 번들러 (JSON-RPC)
+│       ├── bundler/      # ERC-4337 번들러 (내장, EntryPoint 직접 호출)
+│       ├── nonce/        # Redis 기반 nonce 관리
 │       └── kms/          # NHN Cloud KMS / MockKMS
 ├── shared/           # 공통 유틸리티
 │   └── validation.ts # requireFields 등 입력 검증
@@ -99,9 +150,11 @@ Kafka(adapter.withdraw.request)
     → WithdrawService.withdraw()
       → AccountRepository.findByAddress(fromAddress)
       → KmsPort.getSigningKey() → owner 주소 유도
-      → BundlerPort.buildUserOperation()     // nonce 조회, 미배포 시 initCode 포함
+      → NoncePort.acquireNonce(chain, sender)  // Redis에서 원자적 nonce 획득
+      → BundlerPort.buildUserOperation(nonce)  // 미배포 시 initCode 포함
       → KmsPort.sign(userOpHash)
-      → BundlerPort.sendUserOperation()
+      → BundlerPort.sendUserOperation()        // EntryPoint.handleOps 직접 호출
+      → (실패 시) NoncePort.releaseNonce()     // nonce 롤백
       → MessagePublisher.publish(adapter.withdraw.sent)
 ```
 
@@ -110,7 +163,7 @@ Kafka(adapter.withdraw.status)
   → KafkaConsumerAdapter
     → requireFields 검증 (requestId, chain, userOpHash)
     → WithdrawService.checkStatus()
-      → BundlerPort.getUserOperationReceipt()
+      → BundlerPort.getUserOperationReceipt()  // 트랜잭션 영수증 조회
       → MessagePublisher.publish(adapter.withdraw.confirmed)
 ```
 
@@ -125,7 +178,7 @@ Kafka(adapter.withdraw.status)
 
 ```bash
 docker compose up -d
-docker compose ps   # postgres, kafka 둘 다 healthy 확인
+docker compose ps   # postgres, kafka, redis 모두 healthy 확인
 ```
 
 ### 2. Kafka 토픽 생성
@@ -179,7 +232,6 @@ USE_MOCK_KMS=true MOCK_KMS_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb47
 | 항목 | 설명 | 발급처 |
 |---|---|---|
 | `SEPOLIA_RPC_URL` | Sepolia 노드 RPC | [Infura](https://app.infura.io) 또는 [Alchemy](https://dashboard.alchemy.com) |
-| `SEPOLIA_BUNDLER_URL` | ERC-4337 번들러 | [Pimlico](https://dashboard.pimlico.io) (무료) |
 | `NHN_KMS_APP_KEY` 등 | NHN Cloud KMS 인증 | NHN Cloud 콘솔 |
 
 ERC-4337 공식 컨트랙트 주소는 Sepolia에 이미 배포되어 있으므로 수정 불필요:
@@ -200,6 +252,7 @@ npm run dev
 
 ```
 [App] Database connected
+[Redis] Connected to localhost:6379
 [Kafka] Producer connected
 [Kafka] Consumer subscribed to: adapter.account.create, adapter.deposit.confirm, adapter.withdraw.request, adapter.withdraw.status
 [WS] Server listening on port 8080
@@ -338,8 +391,8 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 | **AccountService** | try-catch로 KMS/블록체인/DB 에러를 잡아 `error` 필드 포함 Kafka 응답 발행 |
 | **DepositService.handleDeposit** | try-catch로 DB/Kafka 장애 시 에러 로깅 |
 | **DepositService.checkConfirm** | try-catch로 RPC 에러 시 `status: "failed"` 응답 발행 |
-| **WithdrawService.withdraw** | try-catch로 KMS/번들러/DB 에러를 잡아 `error` 필드 포함 Kafka 응답 발행 |
-| **WithdrawService.checkStatus** | try-catch로 번들러 에러 시 `status: "failed"` 응답 발행 |
+| **WithdrawService.withdraw** | try-catch로 KMS/RPC/Redis/DB 에러를 잡아 `error` 필드 포함 Kafka 응답 발행. nonce 실패 시 롤백 |
+| **WithdrawService.checkStatus** | try-catch로 RPC 에러 시 `status: "failed"` 응답 발행 |
 | **WebSocketAdapter** | 잘못된 JSON 메시지를 catch하여 로깅 |
 
 ## Adding a New Kafka Topic
@@ -358,9 +411,10 @@ kafkaConsumer.register("adapter.new.topic", async (data) => {
 ## Tech Stack
 
 - **TypeScript** — 타입 안전성
-- **ethers.js v6** — EVM 블록체인 상호작용 (CREATE2, ERC-4337 UserOp, 트랜잭션 컨펌)
+- **ethers.js v6** — EVM 블록체인 상호작용 (CREATE2, ERC-4337 UserOp, EntryPoint 직접 호출)
 - **KafkaJS** — Kafka 메시징
 - **TypeORM** — PostgreSQL ORM
+- **ioredis** — Redis 클라이언트 (nonce 원자적 관리)
 - **ws** — WebSocket 서버
 - **axios** — NHN Cloud KMS REST API
-- **Docker Compose** — PostgreSQL + Kafka (KRaft 모드) 로컬 인프라
+- **Docker Compose** — PostgreSQL + Kafka (KRaft 모드) + Redis 로컬 인프라
